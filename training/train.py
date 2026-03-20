@@ -404,6 +404,10 @@ class Trainer:
                     from model import warp
                     warped_prev = warp(prev_output, F.interpolate(mv, prev_output.shape[2:],
                                        mode="bilinear", align_corners=False))
+                    # Resize if scale changed between batches
+                    if warped_prev.shape != fake.shape:
+                        warped_prev = F.interpolate(warped_prev, fake.shape[2:],
+                                                     mode="bilinear", align_corners=False)
                     temp_loss = F.l1_loss(fake, warped_prev)
                 else:
                     temp_loss = torch.tensor(0.0, device=self.device)
