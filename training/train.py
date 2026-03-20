@@ -304,118 +304,95 @@ class Trainer:
 
     def train_epoch(self, loader: DataLoader, adv_weight: float = 0.1,
                     temporal_weight: float = 0.3, d_every: int = 1) -> dict:
+        """
+        Streaming temporal training — each sample is one step.
+        Hidden state flows forward between consecutive samples (detached).
+        No backprop through time = same speed as non-temporal.
+        Exactly matches inference behavior (one frame at a time).
+        """
         self.G.train()
         self.D.train()
 
         totals = {"g": 0, "d": 0, "l1": 0, "perc": 0, "adv": 0, "temp": 0, "n": 0}
 
+        # Persistent hidden state across steps (streaming)
+        prev_output = None
+        prev_hidden = None
+
         for step, sequence in enumerate(tqdm(loader, desc=f"Epoch {self.epoch}")):
-            prev_output = None
-            prev_hidden = None
-            seq_g_loss = torch.tensor(0.0, device=self.device)
-            seq_d_loss = torch.tensor(0.0, device=self.device)
-            seq_metrics = {"l1": 0, "perc": 0, "adv": 0, "temp": 0}
+            frame = sequence[0]  # seq_len=1 now, single frame per step
+            color = frame["color"].to(self.device).float()
+            depth = frame["depth"].to(self.device)
+            mv = frame["motion_vectors"].to(self.device).float()
+            gt = frame["ground_truth"].to(self.device).float()
+            is_real = frame.get("is_real", torch.ones(color.shape[0], dtype=torch.bool))
+            is_real = is_real.to(self.device)
 
-            for t, frame in enumerate(sequence):
-                color = frame["color"].to(self.device).float()
-                depth = frame["depth"].to(self.device)
-                mv = frame["motion_vectors"].to(self.device).float()
-                gt = frame["ground_truth"].to(self.device).float()
-                is_real = frame.get("is_real", torch.ones(color.shape[0], dtype=torch.bool))
-                is_real = is_real.to(self.device)
+            # G forward with streaming hidden state from previous step
+            with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp or self.use_fp8):
+                fake, hidden = self.G(color, depth, mv,
+                                      prev_output=prev_output,
+                                      prev_hidden=prev_hidden)
 
-                # Single G forward — reused for both D and G losses
-                with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp or self.use_fp8):
-                    fake, hidden = self.G(color, depth, mv,
-                                          prev_output=prev_output,
-                                          prev_hidden=prev_hidden)
+                if gt.shape != fake.shape:
+                    gt = F.interpolate(gt, fake.shape[2:], mode="bilinear", align_corners=False)
 
-                    if gt.shape != fake.shape:
-                        gt = F.interpolate(gt, fake.shape[2:], mode="bilinear", align_corners=False)
+                # D forward
+                fake_preds = self.D(fake)
 
-                    # D forward on fake ONCE — used for both D loss and G loss
-                    fake_preds = self.D(fake)
+                if is_real.any():
+                    real_gt = gt[is_real]
+                    real_preds = self.D(real_gt.detach())
+                else:
+                    real_preds = None
 
-                    # D forward on real (only real video, not synthetic)
-                    if is_real.any():
-                        real_gt = gt[is_real]
-                        real_preds = self.D(real_gt.detach())
-                    else:
-                        real_preds = None
+                # D loss
+                fake_preds_detached = [fp.detach() for fp in fake_preds]
+                if real_preds is not None:
+                    d_loss = self.gan_loss.d_loss(real_preds, fake_preds_detached)
+                else:
+                    d_loss = F.relu(1 + fake_preds_detached[0]).mean()
 
-                    # --- D loss (skip if d_every > 1) ---
-                    train_d_this_step = (step % d_every == 0)
-                    if train_d_this_step:
-                        fake_preds_detached = [fp.detach() for fp in fake_preds]
-                        if real_preds is not None:
-                            d_loss_t = self.gan_loss.d_loss(real_preds, fake_preds_detached)
-                        else:
-                            d_loss_t = F.relu(1 + fake_preds_detached[0]).mean()
-                    else:
-                        d_loss_t = torch.tensor(0.0, device=self.device)
+                # G loss
+                l1 = F.l1_loss(fake, gt)
+                adv = self.gan_loss.g_loss(fake_preds)
 
-                    # --- G loss (L1 + GAN, no VGG) ---
-                    l1 = F.l1_loss(fake, gt)
-                    adv = self.gan_loss.g_loss(fake_preds)
+                # Temporal consistency loss
+                if prev_output is not None:
+                    from model import warp
+                    warped_prev = warp(prev_output, F.interpolate(mv, prev_output.shape[2:],
+                                       mode="bilinear", align_corners=False))
+                    temp_loss = F.l1_loss(fake, warped_prev)
+                else:
+                    temp_loss = torch.tensor(0.0, device=self.device)
 
-                    if prev_output is not None and t > 0:
-                        from model import warp
-                        warped_prev = warp(prev_output, F.interpolate(mv, prev_output.shape[2:],
-                                           mode="bilinear", align_corners=False))
-                        temp_loss = F.l1_loss(fake, warped_prev)
-                    else:
-                        temp_loss = torch.tensor(0.0, device=self.device)
+                g_loss = l1 + adv_weight * adv + temporal_weight * temp_loss
 
-                    g_loss_t = l1 + adv_weight * adv + temporal_weight * temp_loss
+            # Update hidden state (detached — no BPTT, just streaming)
+            prev_output = fake.detach()
+            prev_hidden = hidden.detach() if hidden is not None else None
 
-                seq_g_loss = seq_g_loss + g_loss_t / len(sequence)
-                seq_metrics["l1"] += l1.item()
-                seq_metrics["perc"] += 0.0  # VGG removed
-                seq_metrics["adv"] += adv.item()
-                seq_metrics["temp"] += temp_loss.item()
-
-                seq_d_loss = seq_d_loss + d_loss_t / len(sequence)
-
-                prev_output = fake.detach()
-                prev_hidden = hidden
+            # Reset hidden state occasionally to prevent staleness
+            if step % 100 == 0:
+                prev_output = None
+                prev_hidden = None
 
             # Backward + step
-            scaled_g = seq_g_loss / self.grad_accum
-            scaled_d = seq_d_loss / self.grad_accum
+            self.opt_D.zero_grad()
+            d_loss.backward(retain_graph=True)
+            self.opt_D.step()
 
-            if self.scaler_D.is_enabled():
-                self.scaler_D.scale(scaled_d).backward()
-                if (step + 1) % self.grad_accum == 0:
-                    self.scaler_D.step(self.opt_D)
-                    self.scaler_D.update()
-                    self.opt_D.zero_grad()
-
-                self.scaler_G.scale(scaled_g).backward()
-                if (step + 1) % self.grad_accum == 0:
-                    self.scaler_G.step(self.opt_G)
-                    self.scaler_G.update()
-                    self.opt_G.zero_grad()
-            else:
-                # BF16 / FP8 — no scaler needed
-                if train_d_this_step:
-                    scaled_d.backward(retain_graph=True)
-                    if (step + 1) % self.grad_accum == 0:
-                        self.opt_D.step()
-                        self.opt_D.zero_grad()
-
-                scaled_g.backward()
-                if (step + 1) % self.grad_accum == 0:
-                    self.opt_G.step()
-                    self.opt_G.zero_grad()
+            self.opt_G.zero_grad()
+            g_loss.backward()
+            self.opt_G.step()
 
             B = color.shape[0]
-            T = len(sequence)
-            totals["g"] += seq_g_loss.item() * B * self.grad_accum
-            totals["d"] += seq_d_loss.item() * B * self.grad_accum
-            totals["l1"] += seq_metrics["l1"] / T * B
-            totals["perc"] += seq_metrics["perc"] / T * B
-            totals["adv"] += seq_metrics["adv"] / T * B
-            totals["temp"] += seq_metrics["temp"] / T * B
+            totals["g"] += g_loss.item() * B
+            totals["d"] += d_loss.item() * B
+            totals["l1"] += l1.item() * B
+            totals["perc"] += 0.0
+            totals["adv"] += adv.item() * B
+            totals["temp"] += temp_loss.item() * B
             totals["n"] += B
 
         n = max(totals["n"], 1)
