@@ -150,12 +150,20 @@ class PrismDataset(Dataset):
 
     def __getitem__(self, idx: int) -> list[dict]:
         seq = []
+
+        # Pick which pool this sequence comes from (real or synthetic)
+        # All frames in a sequence come from the same pool for consistency
+        if self.balanced:
+            use_synth = self._rng.random() < 0.5 and len(self.synth_indices) >= self.seq_len
+            pool = self.synth_indices if use_synth else self.real_indices
+            start = self._rng.randint(0, max(0, len(pool) - self.seq_len))
+        else:
+            pool = None
+            start = idx
+
         for i in range(self.seq_len):
-            # Balanced sampling: 50% chance real, 50% chance synthetic
-            if self.balanced and self._rng.random() < 0.5 and self.synth_indices:
-                j = self._rng.choice(self.synth_indices)
-            elif self.balanced and self.real_indices:
-                j = self._rng.choice(self.real_indices)
+            if pool is not None:
+                j = pool[min(start + i, len(pool) - 1)]
             else:
                 j = (idx + i) % len(self.all_samples)
             try:
