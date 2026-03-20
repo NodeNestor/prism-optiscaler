@@ -12,6 +12,7 @@
 #include "upscalers/fsr2_212/FSR2Feature_Dx12_212.h"
 #include "upscalers/fsr31/FSR31Feature_Dx12.h"
 #include "upscalers/xess/XeSSFeature_Dx12.h"
+#include "upscalers/prism/PrismFeature_Dx12.h"
 #include "FeatureProvider_Dx11.h"
 
 bool FeatureProvider_Dx12::GetFeature(std::string upscalerName, UINT handleId, NVSDK_NGX_Parameter* parameters,
@@ -21,7 +22,12 @@ bool FeatureProvider_Dx12::GetFeature(std::string upscalerName, UINT handleId, N
 
     do
     {
-        if (upscalerName == "xess")
+        if (upscalerName == "prism" || upscalerName == "prism-basic")
+        {
+            *feature = std::make_unique<PrismFeatureDx12>(handleId, parameters);
+            break;
+        }
+        else if (upscalerName == "xess")
         {
             *feature = std::make_unique<XeSSFeatureDx12>(handleId, parameters);
             break;

@@ -656,6 +656,18 @@
     <ClInclude Include="upscalers\xess\XeSSFeature_Dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="upscalers\prism\PrismFeature.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="upscalers\prism\PrismFeature_Dx12.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="upscalers\prism\PrismFeature_Dx11.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="upscalers\prism\PrismFeature_Vk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="upscalers\IFeature_Dx11wDx12.h">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -1001,6 +1013,24 @@
     <ClCompile Include="upscalers\xess\XeSSFeature_Vk.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="upscalers\prism\PrismFeature.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="upscalers\prism\PrismFeature_Dx12.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="upscalers\prism\PrismFeature_Dx11.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="upscalers\prism\PrismFeature_Vk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="shaders\prism_upscale\PrismUpscale_Vk.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClInclude Include="shaders\prism_upscale\PrismUpscale_Vk.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClCompile Include="framegen\ffx\FSRFG_Dx12.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

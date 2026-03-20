@@ -999,6 +999,12 @@ std::string MenuCommon::GetBackendName(std::string* code)
     if (*code == "dlss")
         return "DLSS";
 
+    if (*code == "prism")
+        return "Prism";
+
+    if (*code == "prism-basic")
+        return "Prism Basic";
+
     return "????";
 }
 
@@ -1044,11 +1050,21 @@ void MenuCommon::AddDx11Backends(std::string* code, std::string* name)
         selectedUpscalerName = "DLSS";
     else if (State::Instance().newBackend == "xess" || (State::Instance().newBackend == "" && *code == "xess"))
         selectedUpscalerName = "XeSS";
+    else if (State::Instance().newBackend == "prism" || (State::Instance().newBackend == "" && *code == "prism"))
+        selectedUpscalerName = "Prism";
+    else if (State::Instance().newBackend == "prism-basic" || (State::Instance().newBackend == "" && *code == "prism-basic"))
+        selectedUpscalerName = "Prism Basic";
     else
         selectedUpscalerName = "XeSS w/Dx12";
 
     if (ImGui::BeginCombo("", selectedUpscalerName.c_str()))
     {
+        if (ImGui::Selectable("Prism", *code == "prism"))
+            State::Instance().newBackend = "prism";
+
+        if (ImGui::Selectable("Prism Basic", *code == "prism-basic"))
+            State::Instance().newBackend = "prism-basic";
+
         if (ImGui::Selectable("XeSS", *code == "xess"))
             State::Instance().newBackend = "xess";
 
@@ -1093,11 +1109,21 @@ void MenuCommon::AddDx12Backends(std::string* code, std::string* name)
     else if (Config::Instance()->DLSSEnabled.value_or_default() &&
              (State::Instance().newBackend == "dlss" || (State::Instance().newBackend == "" && *code == "dlss")))
         selectedUpscalerName = "DLSS";
+    else if (State::Instance().newBackend == "prism" || (State::Instance().newBackend == "" && *code == "prism"))
+        selectedUpscalerName = "Prism";
+    else if (State::Instance().newBackend == "prism-basic" || (State::Instance().newBackend == "" && *code == "prism-basic"))
+        selectedUpscalerName = "Prism Basic";
     else
         selectedUpscalerName = "XeSS";
 
     if (ImGui::BeginCombo("", selectedUpscalerName.c_str()))
     {
+        if (ImGui::Selectable("Prism", *code == "prism"))
+            State::Instance().newBackend = "prism";
+
+        if (ImGui::Selectable("Prism Basic", *code == "prism-basic"))
+            State::Instance().newBackend = "prism-basic";
+
         if (ImGui::Selectable("XeSS", *code == "xess"))
             State::Instance().newBackend = "xess";
 
@@ -1137,11 +1163,21 @@ void MenuCommon::AddVulkanBackends(std::string* code, std::string* name)
         selectedUpscalerName = fsr3xName;
     else if (State::Instance().newBackend == "fsr21_12" || (State::Instance().newBackend == "" && *code == "fsr21_12"))
         selectedUpscalerName = "FSR 2.1.2 w/Dx12";
+    else if (State::Instance().newBackend == "prism" || (State::Instance().newBackend == "" && *code == "prism"))
+        selectedUpscalerName = "Prism";
+    else if (State::Instance().newBackend == "prism-basic" || (State::Instance().newBackend == "" && *code == "prism-basic"))
+        selectedUpscalerName = "Prism Basic";
     else
         selectedUpscalerName = "FSR 2.2.1";
 
     if (ImGui::BeginCombo("", selectedUpscalerName.c_str()))
     {
+        if (ImGui::Selectable("Prism", *code == "prism"))
+            State::Instance().newBackend = "prism";
+
+        if (ImGui::Selectable("Prism Basic", *code == "prism-basic"))
+            State::Instance().newBackend = "prism-basic";
+
         if (ImGui::Selectable("XeSS", *code == "xess"))
             State::Instance().newBackend = "xess";
 

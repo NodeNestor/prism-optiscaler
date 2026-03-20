@@ -14,13 +14,19 @@
 #include "upscalers/fsr31/FSR31Feature_Vk.h"
 #include "upscalers/xess/XeSSFeature_Vk.h"
 #include "upscalers/fsr31/FSR31Feature_VkOn12.h"
+#include "upscalers/prism/PrismFeature_Vk.h"
 
 bool FeatureProvider_Vk::GetFeature(std::string upscalerName, UINT handleId, NVSDK_NGX_Parameter* parameters,
                                     std::unique_ptr<IFeature_Vk>* feature)
 {
     do
     {
-        if (upscalerName == "xess")
+        if (upscalerName == "prism" || upscalerName == "prism-basic")
+        {
+            *feature = std::make_unique<PrismFeatureVk>(handleId, parameters);
+            break;
+        }
+        else if (upscalerName == "xess")
         {
             *feature = std::make_unique<XeSSFeature_Vk>(handleId, parameters);
             break;

@@ -717,6 +717,16 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="shaders\rcas\RCAS_Dx11.cpp" />
     <ClCompile Include="shaders\rcas\RCAS_Dx12.cpp" />
     <ClCompile Include="upscalers\xess\XeSSFeature_Vk.cpp" />
+    <ClCompile Include="upscalers\prism\PrismFeature.cpp" />
+    <ClInclude Include="upscalers\prism\PrismFeature.h" />
+    <ClCompile Include="upscalers\prism\PrismFeature_Dx12.cpp" />
+    <ClInclude Include="upscalers\prism\PrismFeature_Dx12.h" />
+    <ClCompile Include="upscalers\prism\PrismFeature_Dx11.cpp" />
+    <ClInclude Include="upscalers\prism\PrismFeature_Dx11.h" />
+    <ClCompile Include="upscalers\prism\PrismFeature_Vk.cpp" />
+    <ClInclude Include="upscalers\prism\PrismFeature_Vk.h" />
+    <ClCompile Include="shaders\prism_upscale\PrismUpscale_Vk.cpp" />
+    <ClInclude Include="shaders\prism_upscale\PrismUpscale_Vk.h" />
     <ClCompile Include="Util.cpp" />
     <ClCompile Include="version_check.cpp" />
     <ClCompile Include="inputs\XeSS_Debug.cpp" />

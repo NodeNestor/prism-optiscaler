@@ -15,13 +15,19 @@
 #include "upscalers/fsr31/FSR31Feature_Dx11On12.h"
 #include "upscalers/xess/XeSSFeature_Dx11.h"
 #include "upscalers/xess/XeSSFeature_Dx11on12.h"
+#include "upscalers/prism/PrismFeature_Dx11.h"
 
 bool FeatureProvider_Dx11::GetFeature(std::string upscalerName, UINT handleId, NVSDK_NGX_Parameter* parameters,
                                       std::unique_ptr<IFeature_Dx11>* feature)
 {
     do
     {
-        if (upscalerName == "xess")
+        if (upscalerName == "prism" || upscalerName == "prism-basic")
+        {
+            *feature = std::make_unique<PrismFeatureDx11>(handleId, parameters);
+            break;
+        }
+        else if (upscalerName == "xess")
         {
             *feature = std::make_unique<XeSSFeature_Dx11>(handleId, parameters);
             break;
