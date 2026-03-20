@@ -389,7 +389,85 @@ class Trainer:
             import wandb
             wandb.log(metrics, step=self.epoch)
 
+            # Log sample images every 5 epochs
+            if self.epoch % 5 == 0:
+                self._log_sample_images()
+
         return metrics
+
+    def set_fixed_sample(self, loader):
+        """Grab a fixed sample from the dataset for consistent wandb image logging."""
+        for sequence in loader:
+            frame = sequence[0]
+            self._fixed_color = frame["color"][:1].to(self.device).float()
+            self._fixed_depth = frame["depth"][:1].to(self.device).float()
+            self._fixed_mv = frame["motion_vectors"][:1].to(self.device).float()
+            self._fixed_gt = frame["ground_truth"][:1].to(self.device).float()
+            self._fixed_is_real = frame.get("is_real", torch.ones(1, dtype=torch.bool))[0].item()
+            break
+
+    @torch.no_grad()
+    def _log_sample_images(self):
+        """Generate and log sample images to wandb."""
+        import wandb
+        import numpy as np
+
+        if not hasattr(self, "_fixed_color"):
+            return
+
+        self.G.eval()
+
+        try:
+            c = self._fixed_color
+            d = self._fixed_depth
+            mv = self._fixed_mv
+            gt = self._fixed_gt
+            _, _, rH, rW = c.shape
+            _, _, dH, dW = gt.shape
+
+            def to_np(t):
+                return (t[0].cpu().clamp(0, 1).permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+
+            images = {}
+
+            # Input visualizations
+            images["inputs/color"] = wandb.Image(to_np(c), caption=f"Color {rW}x{rH}")
+            depth_np = d[0, 0].cpu().numpy()
+            depth_np = ((depth_np - depth_np.min()) / (depth_np.max() - depth_np.min() + 1e-7) * 255).astype(np.uint8)
+            images["inputs/depth"] = wandb.Image(depth_np, caption="Depth")
+            images["inputs/ground_truth"] = wandb.Image(to_np(gt), caption=f"Ground truth {dW}x{dH}")
+            tag = "real" if self._fixed_is_real else "synthetic"
+            images["inputs/type"] = wandb.Image(to_np(c), caption=f"Source: {tag}")
+
+            # 2x upscale
+            target_2x = (rH * 2, rW * 2)
+            with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp):
+                out_2x, _ = self.G(c, d, mv, target_h=target_2x[0], target_w=target_2x[1])
+            nearest_2x = F.interpolate(c, target_2x, mode="nearest")
+            bilinear_2x = F.interpolate(c, target_2x, mode="bilinear", align_corners=False)
+            images["2x/nearest"] = wandb.Image(to_np(nearest_2x), caption="Nearest 2x")
+            images["2x/bilinear"] = wandb.Image(to_np(bilinear_2x), caption="Bilinear 2x")
+            images["2x/prism"] = wandb.Image(to_np(out_2x), caption=f"Prism 2x (ep{self.epoch})")
+
+            # 3x upscale
+            target_3x = (rH * 3, rW * 3)
+            with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp):
+                out_3x, _ = self.G(c, d, mv, target_h=target_3x[0], target_w=target_3x[1])
+            nearest_3x = F.interpolate(c, target_3x, mode="nearest")
+            images["3x/nearest"] = wandb.Image(to_np(nearest_3x), caption="Nearest 3x")
+            images["3x/prism"] = wandb.Image(to_np(out_3x), caption=f"Prism 3x (ep{self.epoch})")
+
+            # Side-by-side comparison at 2x
+            comparison = torch.cat([nearest_2x, out_2x, F.interpolate(gt, target_2x, mode="bilinear", align_corners=False)], dim=3)
+            images["compare/nearest_vs_prism_vs_gt"] = wandb.Image(
+                to_np(comparison), caption="Nearest | Prism | Ground Truth")
+
+            wandb.log(images, step=self.epoch)
+
+        except Exception as e:
+            print(f"  [wandb image log failed: {e}]")
+        finally:
+            self.G.train()
 
     def save(self, path: Path):
         path.mkdir(parents=True, exist_ok=True)
@@ -512,6 +590,10 @@ def main():
 
             if args.resume:
                 trainer.load(args.resume)
+
+        # Grab a fixed sample for wandb image logging
+        if args.wandb and phase == 0:
+            trainer.set_fixed_sample(loader)
 
         print(f"\nTraining: {phase_epochs} epochs | batch={args.batch} | seq={args.seq_len} | "
               f"crop={crop_size} | {'FP8' if args.fp8 else 'AMP' if args.amp else 'FP32'} | "
