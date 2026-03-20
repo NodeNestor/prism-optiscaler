@@ -287,7 +287,7 @@ class Trainer:
                 is_real = frame.get("is_real", torch.ones(color.shape[0], dtype=torch.bool))
                 is_real = is_real.to(self.device)
 
-                # Generator forward
+                # Single G forward — reused for both D and G losses
                 with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp or self.use_fp8):
                     fake, hidden = self.G(color, depth, mv,
                                           prev_output=prev_output,
@@ -296,14 +296,26 @@ class Trainer:
                     if gt.shape != fake.shape:
                         gt = F.interpolate(gt, fake.shape[2:], mode="bilinear", align_corners=False)
 
-                    # L1 + perceptual: against ALL ground truths (real + synthetic)
-                    # Generator learns structure from synthetic, detail from real
-                    l1 = F.l1_loss(fake, gt)
-                    perc = self.perceptual(fake, gt)
+                    # D forward on fake ONCE — used for both D loss and G loss
+                    fake_preds = self.D(fake)
 
-                    # GAN loss: always — generator must fool D regardless of input source
-                    fake_preds_g = self.D(fake)
-                    adv = self.gan_loss.g_loss(fake_preds_g)
+                    # D forward on real (only real video, not synthetic)
+                    if is_real.any():
+                        real_gt = gt[is_real]
+                        real_preds = self.D(real_gt.detach())
+                    else:
+                        real_preds = None
+
+                    # --- D loss (uses fake_preds detached from G) ---
+                    fake_preds_detached = [fp.detach() for fp in fake_preds]
+                    if real_preds is not None:
+                        d_loss_t = self.gan_loss.d_loss(real_preds, fake_preds_detached)
+                    else:
+                        d_loss_t = F.relu(1 + fake_preds_detached[0]).mean()
+
+                    # --- G loss (L1 + GAN, no VGG) ---
+                    l1 = F.l1_loss(fake, gt)
+                    adv = self.gan_loss.g_loss(fake_preds)
 
                     if prev_output is not None and t > 0:
                         from model import warp
@@ -313,32 +325,13 @@ class Trainer:
                     else:
                         temp_loss = torch.tensor(0.0, device=self.device)
 
-                    g_loss_t = l1 + 0.5 * perc + adv_weight * adv + temporal_weight * temp_loss
+                    g_loss_t = l1 + adv_weight * adv + temporal_weight * temp_loss
 
                 seq_g_loss = seq_g_loss + g_loss_t / len(sequence)
                 seq_metrics["l1"] += l1.item()
-                seq_metrics["perc"] += perc.item()
+                seq_metrics["perc"] += 0.0  # VGG removed
                 seq_metrics["adv"] += adv.item()
                 seq_metrics["temp"] += temp_loss.item()
-
-                # Discriminator — ONLY learns from real video frames as "real"
-                # Synthetic (TartanAir) ground truth is NEVER shown as "real" to D
-                # This forces G to output photorealistic frames even from CG inputs
-                with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp or self.use_fp8):
-                    # Only use real video GTs for the "real" signal
-                    if is_real.any():
-                        real_gt = gt[is_real]
-                        real_preds = self.D(real_gt.detach())
-                    else:
-                        real_preds = None
-
-                    fake_preds = self.D(fake.detach())
-
-                    if real_preds is not None:
-                        d_loss_t = self.gan_loss.d_loss(real_preds, fake_preds)
-                    else:
-                        # No real samples in this batch — only train D on fakes
-                        d_loss_t = F.relu(1 + fake_preds[0]).mean()
 
                 seq_d_loss = seq_d_loss + d_loss_t / len(sequence)
 
