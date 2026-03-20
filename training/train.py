@@ -101,7 +101,7 @@ def make_optimizer(name: str, params, lr: float) -> torch.optim.Optimizer:
 class PrismDataset(Dataset):
     """
     Simple fast dataset. Loads pre-cropped .pt files directly.
-    Files are ~0.5 MB each on NVMe — loading is instant, no async needed.
+    Splits samples into real/synthetic pools and serves balanced batches.
     """
     def __init__(self, data_dir: Path, crop_size: int = 256, seq_len: int = 1,
                  max_samples: int = 0, **kwargs):
@@ -118,9 +118,32 @@ class PrismDataset(Dataset):
         sample_size = self.all_samples[0].stat().st_size
         self.pre_cropped = sample_size < 2 * 1024 * 1024  # < 2MB = pre-cropped
 
-        print(f"Dataset: {len(self.all_samples)} samples, seq_len={seq_len}, "
-              f"crop={crop_size}, pre_cropped={self.pre_cropped}, "
-              f"file_size={sample_size/1024:.0f}KB")
+        # Split into real and synthetic pools for balanced sampling
+        self.real_indices = []
+        self.synth_indices = []
+        print(f"Scanning {len(self.all_samples)} samples for real/synthetic split...")
+        for i, path in enumerate(self.all_samples):
+            try:
+                data = torch.load(path, weights_only=True)
+                if data.get("is_real", torch.tensor(True)).item():
+                    self.real_indices.append(i)
+                else:
+                    self.synth_indices.append(i)
+            except:
+                self.real_indices.append(i)  # assume real if can't load
+            if (i + 1) % 20000 == 0:
+                print(f"  Scanned {i+1}/{len(self.all_samples)}")
+
+        print(f"Dataset: {len(self.all_samples)} samples ({len(self.real_indices)} real, "
+              f"{len(self.synth_indices)} synthetic), seq_len={seq_len}, "
+              f"crop={crop_size}, pre_cropped={self.pre_cropped}")
+
+        # If we have both types, use balanced sampling
+        self.balanced = len(self.real_indices) > 0 and len(self.synth_indices) > 0
+        if self.balanced:
+            import random
+            self._rng = random.Random(42)
+            print(f"  Balanced sampling: ~50/50 real/synthetic per batch")
 
     def __len__(self) -> int:
         return len(self.all_samples) - self.seq_len + 1
@@ -128,7 +151,13 @@ class PrismDataset(Dataset):
     def __getitem__(self, idx: int) -> list[dict]:
         seq = []
         for i in range(self.seq_len):
-            j = (idx + i) % len(self.all_samples)
+            # Balanced sampling: 50% chance real, 50% chance synthetic
+            if self.balanced and self._rng.random() < 0.5 and self.synth_indices:
+                j = self._rng.choice(self.synth_indices)
+            elif self.balanced and self.real_indices:
+                j = self._rng.choice(self.real_indices)
+            else:
+                j = (idx + i) % len(self.all_samples)
             try:
                 data = torch.load(self.all_samples[j], weights_only=True)
             except Exception:
