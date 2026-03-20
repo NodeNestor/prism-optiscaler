@@ -1,0 +1,19 @@
+{
+    "name": "Prism Balanced v2",
+    "version": "2.0",
+    "description": "Balanced quality/speed neural upscaler with photorealistic style transfer",
+    "input_channels": 6,
+    "has_temporal": true,
+    "hidden_channels": 64,
+    "supported_scales": [2, 3],
+    "default_scale": 2,
+    "input_format": {
+        "color": "float32 [1, 3, H, W] range [0,1]",
+        "depth": "float32 [1, 1, H, W] range [0,1] reversed-Z",
+        "motion_vectors": "float32 [1, 2, H, W] pixel-space displacement"
+    },
+    "output_format": {
+        "output": "float32 [1, 3, target_H, target_W] range [0,1]",
+        "hidden": "float32 [1, hidden_channels, H, W] temporal state"
+    }
+}
