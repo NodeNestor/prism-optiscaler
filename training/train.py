@@ -175,6 +175,18 @@ class PrismDataset(Dataset):
             if not self.pre_cropped:
                 data = self._crop(data)
 
+            # Resize gt to fixed scale for consistent batching
+            # Scale is determined by idx (so entire batch uses same scale)
+            _, rH, rW = data["color"].shape
+            scale = 3 if (idx % 5 == 0) else 2  # 20% batches at 3x, 80% at 2x
+            target_h = rH * scale
+            target_w = rW * scale
+            data["target_scale"] = torch.tensor(scale, dtype=torch.int32)
+            data["ground_truth"] = F.interpolate(
+                data["ground_truth"].unsqueeze(0),
+                size=(target_h, target_w), mode="bilinear", align_corners=False
+            ).squeeze(0)
+
             seq.append(data)
         return seq
 
@@ -328,11 +340,13 @@ class Trainer:
             is_real = frame.get("is_real", torch.ones(color.shape[0], dtype=torch.bool))
             is_real = is_real.to(self.device)
 
-            # G forward with streaming hidden state from previous step
+            # G forward with streaming hidden state, target scale from data
+            target_h, target_w = gt.shape[2], gt.shape[3]
             with autocast(device_type="cuda", dtype=self.amp_dtype, enabled=self.use_amp or self.use_fp8):
                 fake, hidden = self.G(color, depth, mv,
                                       prev_output=prev_output,
-                                      prev_hidden=prev_hidden)
+                                      prev_hidden=prev_hidden,
+                                      target_h=target_h, target_w=target_w)
 
                 if gt.shape != fake.shape:
                     gt = F.interpolate(gt, fake.shape[2:], mode="bilinear", align_corners=False)
