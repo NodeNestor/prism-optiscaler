@@ -266,7 +266,7 @@ class Trainer:
             })
 
     def train_epoch(self, loader: DataLoader, adv_weight: float = 0.1,
-                    temporal_weight: float = 0.3) -> dict:
+                    temporal_weight: float = 0.3, d_every: int = 1) -> dict:
         self.G.train()
         self.D.train()
 
@@ -306,12 +306,16 @@ class Trainer:
                     else:
                         real_preds = None
 
-                    # --- D loss (uses fake_preds detached from G) ---
-                    fake_preds_detached = [fp.detach() for fp in fake_preds]
-                    if real_preds is not None:
-                        d_loss_t = self.gan_loss.d_loss(real_preds, fake_preds_detached)
+                    # --- D loss (skip if d_every > 1) ---
+                    train_d_this_step = (step % d_every == 0)
+                    if train_d_this_step:
+                        fake_preds_detached = [fp.detach() for fp in fake_preds]
+                        if real_preds is not None:
+                            d_loss_t = self.gan_loss.d_loss(real_preds, fake_preds_detached)
+                        else:
+                            d_loss_t = F.relu(1 + fake_preds_detached[0]).mean()
                     else:
-                        d_loss_t = F.relu(1 + fake_preds_detached[0]).mean()
+                        d_loss_t = torch.tensor(0.0, device=self.device)
 
                     # --- G loss (L1 + GAN, no VGG) ---
                     l1 = F.l1_loss(fake, gt)
@@ -356,10 +360,11 @@ class Trainer:
                     self.opt_G.zero_grad()
             else:
                 # BF16 / FP8 — no scaler needed
-                scaled_d.backward()
-                if (step + 1) % self.grad_accum == 0:
-                    self.opt_D.step()
-                    self.opt_D.zero_grad()
+                if train_d_this_step:
+                    scaled_d.backward(retain_graph=True)
+                    if (step + 1) % self.grad_accum == 0:
+                        self.opt_D.step()
+                        self.opt_D.zero_grad()
 
                 scaled_g.backward()
                 if (step + 1) % self.grad_accum == 0:
@@ -444,8 +449,10 @@ def main():
     parser.add_argument("--optimizer", choices=["adamw", "apollo-mini", "apollo"], default="apollo-mini")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch", type=int, default=4)
-    parser.add_argument("--crop", type=int, default=256)
-    parser.add_argument("--seq-len", type=int, default=3)
+    parser.add_argument("--crop", type=int, default=128)
+    parser.add_argument("--seq-len", type=int, default=1)
+    parser.add_argument("--progressive", action="store_true",
+                        help="Progressive training: start small crops, grow over epochs")
     parser.add_argument("--lr-g", type=float, default=1e-4)
     parser.add_argument("--lr-d", type=float, default=4e-4)
     parser.add_argument("--amp", action="store_true", help="FP16/BF16 mixed precision")
@@ -454,47 +461,81 @@ def main():
     parser.add_argument("--adv-warmup", type=int, default=10)
     parser.add_argument("--save-every", type=int, default=10)
     parser.add_argument("--device", default="cuda:1", help="cuda:0=4060, cuda:1=5060Ti")
+    parser.add_argument("--multi-gpu", action="store_true", help="Use DataParallel across all GPUs")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--export-onnx", action="store_true")
+    parser.add_argument("--d-every", type=int, default=1, help="Train D every N steps (1=every step)")
     args = parser.parse_args()
 
-    dataset = PrismDataset(args.data, crop_size=args.crop, seq_len=args.seq_len)
-    loader = DataLoader(
-        dataset, batch_size=args.batch, shuffle=True,
-        num_workers=args.workers, pin_memory=True,
-        drop_last=True, collate_fn=collate_sequences,
-    )
+    # Progressive training schedule: crop size grows over epochs
+    if args.progressive:
+        schedule = [
+            (64, int(args.epochs * 0.4)),    # 40% of epochs at 64x64 (fast)
+            (128, int(args.epochs * 0.35)),   # 35% at 128x128 (medium)
+            (192, int(args.epochs * 0.15)),   # 15% at 192x192 (detailed)
+            (256, int(args.epochs * 0.10)),   # 10% at 256x256 (full context)
+        ]
+        print(f"Progressive training schedule:")
+        for crop, epochs in schedule:
+            print(f"  {crop}x{crop} for {epochs} epochs")
+    else:
+        schedule = [(args.crop, args.epochs)]
 
-    trainer = Trainer(
-        model_name=args.model, optimizer_name=args.optimizer,
-        lr_g=args.lr_g, lr_d=args.lr_d,
-        device=args.device, use_amp=args.amp, use_fp8=args.fp8,
-        grad_accum=args.grad_accum, use_wandb=args.wandb,
-    )
+    total_epochs_done = 0
 
-    if args.resume:
-        trainer.load(args.resume)
+    for phase, (crop_size, phase_epochs) in enumerate(schedule):
+        print(f"\n{'='*60}")
+        print(f"Phase {phase}: crop={crop_size}x{crop_size}, {phase_epochs} epochs")
+        print(f"{'='*60}")
 
-    print(f"\nTraining: {args.epochs} epochs | batch={args.batch} | seq={args.seq_len} | "
-          f"crop={args.crop} | {'FP8' if args.fp8 else 'AMP' if args.amp else 'FP32'} | "
-          f"{args.optimizer}\n")
+        dataset = PrismDataset(args.data, crop_size=crop_size, seq_len=args.seq_len)
+        loader = DataLoader(
+            dataset, batch_size=args.batch, shuffle=True,
+            num_workers=args.workers, pin_memory=True,
+            drop_last=True, collate_fn=collate_sequences,
+        )
 
-    try:
-        for epoch in range(trainer.epoch, args.epochs):
-            adv_w = 0.1 + 0.4 * min(1.0, epoch / max(args.adv_warmup, 1))
+        if phase == 0:
+            trainer = Trainer(
+                model_name=args.model, optimizer_name=args.optimizer,
+                lr_g=args.lr_g, lr_d=args.lr_d,
+                device=args.device, use_amp=args.amp, use_fp8=args.fp8,
+                grad_accum=args.grad_accum, use_wandb=args.wandb,
+            )
 
-            t0 = time.time()
-            m = trainer.train_epoch(loader, adv_weight=adv_w)
-            dt = time.time() - t0
+            # Multi-GPU with DataParallel
+            if args.multi_gpu and torch.cuda.device_count() > 1:
+                print(f"Using {torch.cuda.device_count()} GPUs with DataParallel")
+                trainer.G = torch.nn.DataParallel(trainer.G)
+                trainer.D = torch.nn.DataParallel(trainer.D)
 
-            print(f"  L1={m['l1']:.4f} perc={m['perc']:.4f} adv={m['adv']:.4f}(w={adv_w:.2f}) "
-                  f"temp={m['temp']:.4f} D={m['d']:.4f} [{dt:.1f}s]")
+            if args.resume:
+                trainer.load(args.resume)
 
-            if (epoch + 1) % args.save_every == 0:
-                trainer.save(args.output)
-    except KeyboardInterrupt:
-        print("\nInterrupted")
+        print(f"\nTraining: {phase_epochs} epochs | batch={args.batch} | seq={args.seq_len} | "
+              f"crop={crop_size} | {'FP8' if args.fp8 else 'AMP' if args.amp else 'FP32'} | "
+              f"{args.optimizer} | d_every={args.d_every}\n")
+
+        try:
+            for epoch in range(phase_epochs):
+                total_epoch = total_epochs_done + epoch
+                adv_w = 0.1 + 0.4 * min(1.0, total_epoch / max(args.adv_warmup, 1))
+
+                t0 = time.time()
+                m = trainer.train_epoch(loader, adv_weight=adv_w, d_every=args.d_every)
+                dt = time.time() - t0
+
+                print(f"  [{total_epoch+1}] L1={m['l1']:.4f} adv={m['adv']:.4f}(w={adv_w:.2f}) "
+                      f"temp={m['temp']:.4f} D={m['d']:.4f} [{dt:.1f}s]")
+
+                if (total_epoch + 1) % args.save_every == 0:
+                    trainer.save(args.output)
+        except KeyboardInterrupt:
+            print("\nInterrupted")
+            break
+
+        total_epochs_done += phase_epochs
 
     trainer.save(args.output)
     if args.export_onnx:
