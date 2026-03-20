@@ -175,17 +175,8 @@ class PrismDataset(Dataset):
             if not self.pre_cropped:
                 data = self._crop(data)
 
-            # Resize gt to fixed scale for consistent batching
-            # Scale is determined by idx (so entire batch uses same scale)
-            _, rH, rW = data["color"].shape
-            scale = 3 if (idx % 5 == 0) else 2  # 20% batches at 3x, 80% at 2x
-            target_h = rH * scale
-            target_w = rW * scale
-            data["target_scale"] = torch.tensor(scale, dtype=torch.int32)
-            data["ground_truth"] = F.interpolate(
-                data["ground_truth"].unsqueeze(0),
-                size=(target_h, target_w), mode="bilinear", align_corners=False
-            ).squeeze(0)
+            # Keep original gt, collate will handle resizing per-batch
+            pass
 
             seq.append(data)
         return seq
@@ -217,12 +208,36 @@ class PrismDataset(Dataset):
 
 
 def collate_sequences(batch: list[list[dict]]) -> list[dict]:
+    """Collate batch with mixed scales — resize gt to match a randomly chosen scale."""
+    import random
     seq_len = len(batch[0])
+
+    # Pick one scale for the entire batch: 2x (80%) or 3x (20%)
+    scale = 3 if random.random() < 0.3 else 2
+
     result = []
     for t in range(seq_len):
         frame = {}
         for key in batch[0][0].keys():
-            frame[key] = torch.stack([batch[b][t][key] for b in range(len(batch))])
+            tensors = [batch[b][t][key] for b in range(len(batch))]
+
+            if key == "ground_truth":
+                # Resize all gt to the chosen scale
+                rH = batch[0][t]["color"].shape[1]
+                rW = batch[0][t]["color"].shape[2]
+                target_h = rH * scale
+                target_w = rW * scale
+                resized = []
+                for gt in tensors:
+                    if gt.shape[1] != target_h or gt.shape[2] != target_w:
+                        gt = F.interpolate(gt.unsqueeze(0), (target_h, target_w),
+                                           mode="bilinear", align_corners=False).squeeze(0)
+                    resized.append(gt)
+                frame[key] = torch.stack(resized)
+            else:
+                frame[key] = torch.stack(tensors)
+
+        frame["target_scale"] = torch.tensor(scale, dtype=torch.int32)
         result.append(frame)
     return result
 
