@@ -118,31 +118,44 @@ class PrismDataset(Dataset):
         sample_size = self.all_samples[0].stat().st_size
         self.pre_cropped = sample_size < 2 * 1024 * 1024  # < 2MB = pre-cropped
 
-        # Split into real and synthetic pools for balanced sampling
-        self.real_indices = []
-        self.synth_indices = []
-        print(f"Scanning {len(self.all_samples)} samples for real/synthetic split...")
-        for i, path in enumerate(self.all_samples):
-            try:
-                data = torch.load(path, weights_only=True)
-                if data.get("is_real", torch.tensor(True)).item():
+        # Load or build real/synthetic split index
+        import json
+        import random
+        self._rng = random.Random(42)
+
+        index_path = data_dir / "split_index.json"
+        if index_path.exists():
+            with open(index_path) as f:
+                index = json.load(f)
+            self.real_indices = index["real"]
+            self.synth_indices = index["synth"]
+            print(f"Loaded split index: {len(self.real_indices)} real, {len(self.synth_indices)} synth")
+        else:
+            print(f"No split_index.json found — scanning {len(self.all_samples)} samples...")
+            self.real_indices = []
+            self.synth_indices = []
+            for i, path in enumerate(self.all_samples):
+                try:
+                    data = torch.load(path, weights_only=True)
+                    if data.get("is_real", torch.tensor(True)).item():
+                        self.real_indices.append(i)
+                    else:
+                        self.synth_indices.append(i)
+                except:
                     self.real_indices.append(i)
-                else:
-                    self.synth_indices.append(i)
-            except:
-                self.real_indices.append(i)  # assume real if can't load
-            if (i + 1) % 20000 == 0:
-                print(f"  Scanned {i+1}/{len(self.all_samples)}")
+                if (i + 1) % 20000 == 0:
+                    print(f"  Scanned {i+1}/{len(self.all_samples)}")
+            # Save for next time
+            with open(index_path, "w") as f:
+                json.dump({"real": self.real_indices, "synth": self.synth_indices}, f)
+            print(f"  Saved split index to {index_path}")
 
         print(f"Dataset: {len(self.all_samples)} samples ({len(self.real_indices)} real, "
               f"{len(self.synth_indices)} synthetic), seq_len={seq_len}, "
               f"crop={crop_size}, pre_cropped={self.pre_cropped}")
 
-        # If we have both types, use balanced sampling
         self.balanced = len(self.real_indices) > 0 and len(self.synth_indices) > 0
         if self.balanced:
-            import random
-            self._rng = random.Random(42)
             print(f"  Balanced sampling: ~50/50 real/synthetic per batch")
 
     def __len__(self) -> int:
