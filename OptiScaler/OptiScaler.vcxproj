@@ -382,6 +382,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClInclude Include="framegen\extrap\CadenceController.h" />
     <ClInclude Include="framegen\extrap\ExtrapPipeline.h" />
     <ClInclude Include="framegen\extrap\ExtrapShaders.h" />
+    <ClInclude Include="upscalers\prism\PrismModelRegistry.h" />
     <ClInclude Include="hooks\Advapi32_Hooks.h" />
     <ClInclude Include="hooks\Crypt32_Hooks.h" />
     <ClInclude Include="hooks\Gdi32_Hooks.h" />
@@ -586,6 +587,7 @@ copy NUL "$(SolutionDir)x64\Release\a\!! EXTRACT ALL FILES TO GAME FOLDER !!" /Y
     <ClCompile Include="framegen\extrap\MouseTracker.cpp" />
     <ClCompile Include="framegen\extrap\CadenceController.cpp" />
     <ClCompile Include="framegen\extrap\ExtrapPipeline.cpp" />
+    <ClCompile Include="upscalers\prism\PrismModelRegistry.cpp" />
     <ClCompile Include="hooks\Streamline_Hooks.cpp" />
     <ClCompile Include="hudfix\Hudfix_Dx12.cpp" />
     <ClCompile Include="include\imgui\imgui_impl_dx11.cpp">

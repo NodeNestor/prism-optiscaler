@@ -203,6 +203,14 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGExtrapDebugLayers.set_from_config(readBool("FGExtrap", "DebugLayers"));
         }
 
+        // Prism Upscaler
+        {
+            PrismMode.set_from_config(readInt("Prism", "Mode"));
+            PrismModelPath.set_from_config(readString("Prism", "ModelPath"));
+            PrismSelectedModel.set_from_config(readInt("Prism", "SelectedModel"));
+            PrismSharpness.set_from_config(readFloat("Prism", "Sharpness"));
+        }
+
         // FSR FG Inputs
         {
             FSRFGSkipConfigForHudless.set_from_config(readBool("FSRFGInputs", "SkipConfigForHudless"));
@@ -860,6 +868,17 @@ bool Config::SaveIni()
                      GetBoolValue(Instance()->FGExtrapMVExtrapolation.value_for_config()).c_str());
         ini.SetValue("FGExtrap", "DebugLayers",
                      GetBoolValue(Instance()->FGExtrapDebugLayers.value_for_config()).c_str());
+    }
+
+    // Prism Upscaler
+    {
+        ini.SetValue("Prism", "Mode", GetIntValue(Instance()->PrismMode.value_for_config()).c_str());
+        if (Instance()->PrismModelPath.has_value())
+            ini.SetValue("Prism", "ModelPath", Instance()->PrismModelPath.value().c_str());
+        ini.SetValue("Prism", "SelectedModel",
+                     GetIntValue(Instance()->PrismSelectedModel.value_for_config()).c_str());
+        ini.SetValue("Prism", "Sharpness",
+                     GetFloatValue(Instance()->PrismSharpness.value_for_config()).c_str());
     }
 
     // OptiFG

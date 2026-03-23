@@ -11,6 +11,8 @@
 
 #include <fsr4/FSR4Upgrade.h>
 
+#include <upscalers/prism/PrismModelRegistry.h>
+
 #include <nvapi/fakenvapi.h>
 #include <hooks/Reflex_Hooks.h>
 
@@ -3172,20 +3174,23 @@ bool MenuCommon::RenderMenu()
                     "FSR3-FG via Nukem's",  // Nukems
                     "FSR FG",               // FSRFG
                     "DLSSG",                // DLSSG
-                    "XeFG"                  // XeFG
+                    "XeFG",                 // XeFG
+                    "Frame Extrapolation"   // FGExtrap
                 };
                 std::vector<std::string> fgOutputDesc = {
                     "",
-                    "Enable DLSS-FG in-game", 
-                    "FSR3/4 FG", 
-                    "Support not implemented", 
+                    "Enable DLSS-FG in-game",
+                    "FSR3/4 FG",
+                    "Support not implemented",
                     "XeFG",
+                    "Depth-layered reprojection with mouse input (DX12)",
                 };
-                std::vector<uint8_t> disabledMaskOutput = { 
-                    false, 
-                    false, 
-                    false, 
-                    true, 
+                std::vector<uint8_t> disabledMaskOutput = {
+                    false,
+                    false,
+                    false,
+                    true,
+                    false,
                     false,
                 };
                 // clang-format on
@@ -3877,6 +3882,67 @@ bool MenuCommon::RenderMenu()
                     }
                 }
 
+                // FGExtrap settings
+                if (state.activeFgOutput == FGOutput::FGExtrap)
+                {
+                    ImGui::Spacing();
+                    if (auto ch = ScopedCollapsingHeader("Frame Extrapolation Settings"); ch.IsHeaderOpen())
+                    {
+                        ImGui::Spacing();
+
+                        int targetFPS = config->FGExtrapTargetFPS.value_or_default();
+                        if (ImGui::SliderInt("Target FPS", &targetFPS, 30, 360))
+                            config->FGExtrapTargetFPS = targetFPS;
+                        ShowHelpMarker("Target framerate. Adaptive cadence inserts synthetic frames to reach this.");
+
+                        float sensitivity = config->FGExtrapMouseSensitivity.value_or_default();
+                        if (ImGui::SliderFloat("Mouse Sensitivity", &sensitivity, 0.01f, 10.0f, "%.2f"))
+                            config->FGExtrapMouseSensitivity = sensitivity;
+                        ShowHelpMarker("Mouse delta to camera angle factor. Auto-calibrate adjusts this automatically.");
+
+                        bool autoCalib = config->FGExtrapAutoCalibrate.value_or_default();
+                        if (ImGui::Checkbox("Auto Calibrate Sensitivity", &autoCalib))
+                            config->FGExtrapAutoCalibrate = autoCalib;
+
+                        float depthScale = config->FGExtrapDepthScale.value_or_default();
+                        if (ImGui::SliderFloat("Depth Scale", &depthScale, 0.0f, 5.0f, "%.2f"))
+                            config->FGExtrapDepthScale = depthScale;
+                        ShowHelpMarker("Parallax strength. Higher = more depth separation between layers.");
+
+                        int gapMode = config->FGExtrapGapFillMode.value_or_default();
+                        const char* gapModes[] = { "Extend", "Fourier" };
+                        if (ImGui::Combo("Gap Fill Mode", &gapMode, gapModes, 2))
+                            config->FGExtrapGapFillMode = gapMode;
+                        ShowHelpMarker("Extend is faster. Fourier produces better quality for fast motion.");
+
+                        bool debugLayers = config->FGExtrapDebugLayers.value_or_default();
+                        if (ImGui::Checkbox("Debug Layer Visualization", &debugLayers))
+                            config->FGExtrapDebugLayers = debugLayers;
+                        ShowHelpMarker("Color-tint each depth layer: Red=HUD, Blue=Sky, Green=Far, Yellow=Mid, Orange=Near");
+
+                        if (ImGui::TreeNode("Depth Thresholds"))
+                        {
+                            float hudT = config->FGExtrapHUDThreshold.value_or_default();
+                            float nearT = config->FGExtrapNearThreshold.value_or_default();
+                            float farT = config->FGExtrapFarThreshold.value_or_default();
+                            float skyT = config->FGExtrapSkyThreshold.value_or_default();
+
+                            if (ImGui::SliderFloat("HUD", &hudT, 0.0f, 0.01f, "%.4f"))
+                                config->FGExtrapHUDThreshold = hudT;
+                            if (ImGui::SliderFloat("Near", &nearT, 0.01f, 0.3f, "%.3f"))
+                                config->FGExtrapNearThreshold = nearT;
+                            if (ImGui::SliderFloat("Far", &farT, 0.5f, 0.95f, "%.3f"))
+                                config->FGExtrapFarThreshold = farT;
+                            if (ImGui::SliderFloat("Sky", &skyT, 0.9f, 1.0f, "%.4f"))
+                                config->FGExtrapSkyThreshold = skyT;
+
+                            ImGui::TreePop();
+                        }
+
+                        ImGui::Spacing();
+                    }
+                }
+
                 // OptiFG
                 if (state.api == DX12 && state.currentFGSwapchain != nullptr && !state.isWorkingAsNvngx &&
                     state.activeFgInput == FGInput::Upscaler)
@@ -3885,7 +3951,8 @@ bool MenuCommon::RenderMenu()
 
                     if (currentFeature != nullptr && !currentFeature->IsFrozen() &&
                         ((state.activeFgOutput == FGOutput::FSRFG && FfxApiProxy::IsFGReady()) ||
-                         (state.activeFgOutput == FGOutput::XeFG && XeFGProxy::Module() != nullptr)))
+                         (state.activeFgOutput == FGOutput::XeFG && XeFGProxy::Module() != nullptr) ||
+                         (state.activeFgOutput == FGOutput::FGExtrap)))
                     {
                         bool fgHudfix = config->FGHUDFix.value_or_default();
                         bool disableHudfix = static_cast<bool>(state.gameQuirks & GameQuirk::DisableHudfix);
@@ -4560,6 +4627,55 @@ bool MenuCommon::RenderMenu()
 
                 if (currentFeature != nullptr && !currentFeature->IsFrozen())
                 {
+                    // PRISM SETTINGS (when using Prism upscaler)
+                    if (currentBackend == "prism" || currentBackend == "prism-basic")
+                    {
+                        ImGui::SeparatorText("Prism Upscaler");
+
+                        int prismMode = config->PrismMode.value_or_default();
+                        const char* prismModes[] = { "Basic (Temporal)", "Neural" };
+                        if (ImGui::Combo("Mode", &prismMode, prismModes, 2))
+                            config->PrismMode = prismMode;
+
+                        if (prismMode == 0)
+                        {
+                            ShowHelpMarker("Temporal jitter-aware upscaling. No AI, uses motion vectors and history for quality.");
+                        }
+                        else
+                        {
+                            ShowHelpMarker("Neural network upscaling via Vulkan inference engine.");
+
+                            auto& registry = PrismModelRegistry::Instance();
+                            if (registry.HasModels())
+                            {
+                                int selected = config->PrismSelectedModel.value_or_default();
+                                if (ImGui::BeginCombo("Model", registry.GetModel(selected) ? registry.GetModel(selected)->name.c_str() : "None"))
+                                {
+                                    for (int i = 0; i < registry.GetModelCount(); i++)
+                                    {
+                                        auto* model = registry.GetModel(i);
+                                        bool isSelected = (i == selected);
+                                        char label[128];
+                                        snprintf(label, sizeof(label), "%s (%dch, %dx)", model->name.c_str(), model->channels, model->scale);
+                                        if (ImGui::Selectable(label, isSelected))
+                                            config->PrismSelectedModel = i;
+                                        if (isSelected)
+                                            ImGui::SetItemDefaultFocus();
+                                    }
+                                    ImGui::EndCombo();
+                                }
+                            }
+                            else
+                            {
+                                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "No models found in prism_models/");
+                            }
+                        }
+
+                        float prismSharp = config->PrismSharpness.value_or_default();
+                        if (ImGui::SliderFloat("Prism Sharpness", &prismSharp, 0.0f, 1.0f, "%.2f"))
+                            config->PrismSharpness = prismSharp;
+                    }
+
                     // SHARPNESS -----------------------------
                     ImGui::SeparatorText("Sharpness");
 

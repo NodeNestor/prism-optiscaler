@@ -511,6 +511,12 @@ class Config
     CustomOptional<bool> FGExtrapMVExtrapolation { true };
     CustomOptional<bool> FGExtrapDebugLayers { false };
 
+    // Prism Upscaler
+    CustomOptional<int> PrismMode { 0 };                // 0=basic (temporal), 1=neural
+    CustomOptional<std::string> PrismModelPath { std::string("prism_models") };
+    CustomOptional<int> PrismSelectedModel { 0 };       // index into discovered models
+    CustomOptional<float> PrismSharpness { 0.3f };
+
     // fakenvapi
     CustomOptional<bool> FN_EnableLogs { true };
     CustomOptional<bool> FN_EnableTraceLogs { false };
