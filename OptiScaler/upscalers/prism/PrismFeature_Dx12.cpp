@@ -192,6 +192,8 @@ PrismFeatureDx12::~PrismFeatureDx12()
     if (State::Instance().isShuttingDown)
         return;
 
+    if (_neuralBridge) _neuralBridge->Shutdown();
+
     if (_pipelineState) { _pipelineState->Release(); _pipelineState = nullptr; }
     if (_rootSignature) { _rootSignature->Release(); _rootSignature = nullptr; }
     if (_constantBuffer) { _constantBuffer->Release(); _constantBuffer = nullptr; }
@@ -380,14 +382,54 @@ bool PrismFeatureDx12::Init(ID3D12Device* InDevice, ID3D12GraphicsCommandList* I
     auto modelPath = Util::ExePath().parent_path() / Config::Instance()->PrismModelPath.value_or_default();
     PrismModelRegistry::Instance().ScanDirectory(modelPath);
 
+    // Try to initialize neural bridge if mode is neural and models exist
+    _activeMode = Config::Instance()->PrismMode.value_or_default();
+    if (_activeMode == 1)
+    {
+        InitNeuralBridge(_renderWidth, _renderHeight);
+    }
+
     SetInit(true);
     _prismInited = true;
 
-    int mode = Config::Instance()->PrismMode.value_or_default();
+    int mode = _activeMode;
     LOG_INFO("[Prism] DX12 initialized: render={}x{} -> display={}x{}, mode={}",
              _renderWidth, _renderHeight, _displayWidth, _displayHeight,
              mode == 0 ? "Basic" : "Neural");
 
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Neural bridge initialization
+// ---------------------------------------------------------------------------
+bool PrismFeatureDx12::InitNeuralBridge(int renderW, int renderH)
+{
+    auto& registry = PrismModelRegistry::Instance();
+    int selectedIdx = Config::Instance()->PrismSelectedModel.value_or_default();
+
+    auto* model = registry.GetModel(selectedIdx);
+    if (!model)
+    {
+        LOG_WARN("[Prism] No model selected or available — staying in Basic mode");
+        _activeMode = 0;
+        return false;
+    }
+
+    // Shader directory is next to the weights file or in prism-inference submodule
+    auto shaderDir = (Util::ExePath().parent_path() / "prism_models" / "shaders").string();
+
+    _neuralBridge = std::make_unique<PrismNeuralBridge>();
+    if (!_neuralBridge->Init(Device, *model, renderW, renderH, shaderDir))
+    {
+        LOG_ERROR("[Prism] Neural bridge init failed — falling back to Basic mode");
+        _neuralBridge.reset();
+        _activeMode = 0;
+        return false;
+    }
+
+    LOG_INFO("[Prism] Neural bridge ready: model={} ({}ch, {}blocks, {}x)",
+             model->name, model->channels, model->blocks, model->scale);
     return true;
 }
 
@@ -416,6 +458,20 @@ bool PrismFeatureDx12::Evaluate(ID3D12GraphicsCommandList* InCommandList, NVSDK_
     {
         LOG_ERROR("[Prism] Missing color or output resource");
         return false;
+    }
+
+    // Neural mode — use Vulkan inference engine
+    if (_activeMode == 1 && _neuralBridge && _neuralBridge->IsInitialized())
+    {
+        float inferMs = _neuralBridge->Evaluate(InCommandList, paramColor, paramDepth, paramMV, paramOutput);
+        if (inferMs >= 0)
+        {
+            if (_frameCount % 300 == 0)
+                LOG_INFO("[Prism] Neural inference: {:.2f}ms", inferMs);
+            return true;
+        }
+        // Fall through to Basic mode if neural fails
+        LOG_WARN("[Prism] Neural inference failed — falling back to Basic");
     }
 
     // Log on first frame

@@ -1,7 +1,10 @@
 #pragma once
 #include "PrismFeature.h"
 #include "PrismModelRegistry.h"
+#include "PrismNeuralBridge.h"
 #include "upscalers/IFeature_Dx12.h"
+
+#include <memory>
 
 class PrismFeatureDx12 : public PrismFeature, public IFeature_Dx12
 {
@@ -51,8 +54,13 @@ class PrismFeatureDx12 : public PrismFeature, public IFeature_Dx12
     FrameHeapData _heaps[NUM_HEAPS] = {};
     UINT _heapIndex = 0;
 
+    // Neural inference bridge (Vulkan engine with DX12 interop)
+    std::unique_ptr<PrismNeuralBridge> _neuralBridge;
+    int _activeMode = 0; // 0=basic, 1=neural
+
     bool CompileUpscaleShader(ID3D12Device* device);
     bool EnsureHistoryBuffer(ID3D12Device* device, UINT width, UINT height, DXGI_FORMAT format);
+    bool InitNeuralBridge(int renderW, int renderH);
 
   public:
     PrismFeatureDx12(unsigned int InHandleId, NVSDK_NGX_Parameter* InParameters);
