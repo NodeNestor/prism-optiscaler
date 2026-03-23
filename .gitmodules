@@ -19,3 +19,9 @@
 [submodule "external/magic_enum"]
 	path = external/magic_enum
 	url = https://github.com/Neargye/magic_enum
+[submodule "prism-inference"]
+	path = prism-inference
+	url = https://github.com/NodeNestor/prism-inference.git
+[submodule "prism-training"]
+	path = prism-training
+	url = https://github.com/NodeNestor/prism-training.git
