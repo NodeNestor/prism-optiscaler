@@ -497,6 +497,20 @@ class Config
     CustomOptional<bool> FGXeFGModifyBufferState { false };
     CustomOptional<bool> FGXeFGModifySCIndex { false };
 
+    // FGExtrap (Frame Extrapolation)
+    CustomOptional<int> FGExtrapTargetFPS { 120 };
+    CustomOptional<float> FGExtrapMouseSensitivity { 1.0f };
+    CustomOptional<bool> FGExtrapAutoCalibrate { true };
+    CustomOptional<float> FGExtrapDepthScale { 1.0f };
+    CustomOptional<float> FGExtrapFOV { 90.0f };
+    CustomOptional<float> FGExtrapNearThreshold { 0.05f };
+    CustomOptional<float> FGExtrapFarThreshold { 0.80f };
+    CustomOptional<float> FGExtrapSkyThreshold { 0.99f };
+    CustomOptional<float> FGExtrapHUDThreshold { 0.001f };
+    CustomOptional<int> FGExtrapGapFillMode { 0 }; // 0=extend, 1=fourier
+    CustomOptional<bool> FGExtrapMVExtrapolation { true };
+    CustomOptional<bool> FGExtrapDebugLayers { false };
+
     // fakenvapi
     CustomOptional<bool> FN_EnableLogs { true };
     CustomOptional<bool> FN_EnableTraceLogs { false };

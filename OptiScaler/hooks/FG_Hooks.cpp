@@ -4,6 +4,7 @@
 
 #include <framegen/ffx/FSRFG_Dx12.h>
 #include <framegen/xefg/XeFG_Dx12.h>
+#include <framegen/extrap/FGExtrap_Dx12.h>
 
 #include <inputs/FG/FSR3_Dx12_FG.h>
 #include <inputs/FG/FfxApi_Dx12_FG.h>
@@ -45,9 +46,11 @@ static bool CheckForFGStatus()
         State::Instance().activeFgOutput = Config::Instance()->FGOutput.value_or_default();
     }
 
-    if (State::Instance().activeFgOutput != FGOutput::FSRFG && State::Instance().activeFgOutput != FGOutput::XeFG)
+    if (State::Instance().activeFgOutput != FGOutput::FSRFG &&
+        State::Instance().activeFgOutput != FGOutput::XeFG &&
+        State::Instance().activeFgOutput != FGOutput::FGExtrap)
     {
-        LOG_WARN("FGOutput is not set to FSR-FG or XeFG");
+        LOG_WARN("FGOutput is not set to FSR-FG, XeFG, or FGExtrap");
         return false;
     }
 
@@ -84,6 +87,10 @@ HRESULT FGHooks::CreateSwapChain(IDXGIFactory* pFactory, IUnknown* pDevice, DXGI
         {
             State::Instance().currentFG =
                 new XeFG_Dx12(Config::Instance()->FGXeFGInterpolationCount.value_or_default());
+        }
+        else if (State::Instance().activeFgOutput == FGOutput::FGExtrap)
+        {
+            State::Instance().currentFG = new FGExtrap_Dx12();
         }
     }
     // else
@@ -171,6 +178,10 @@ HRESULT FGHooks::CreateSwapChainForHwnd(IDXGIFactory* pFactory, IUnknown* pDevic
         {
             State::Instance().currentFG =
                 new XeFG_Dx12(Config::Instance()->FGXeFGInterpolationCount.value_or_default());
+        }
+        else if (State::Instance().activeFgOutput == FGOutput::FGExtrap)
+        {
+            State::Instance().currentFG = new FGExtrap_Dx12();
         }
     }
     // else
@@ -966,6 +977,27 @@ HRESULT FGHooks::FGPresent(void* This, UINT SyncInterval, UINT Flags, const DXGI
         fg->Mutex.unlockThis(2);
     }
 
+    return result;
+}
+
+HRESULT FGHooks::PresentSynthetic(void* swapchainThis, UINT SyncInterval, UINT Flags)
+{
+    if (o_FGSCPresent == nullptr)
+    {
+        LOG_ERROR("[FGExtrap] PresentSynthetic: o_FGSCPresent is null!");
+        return E_FAIL;
+    }
+
+    // Set skip flags to prevent recursion through our own hooks
+    _skipPresent = true;
+    _skipPresent1 = true;
+
+    HRESULT result = o_FGSCPresent(swapchainThis, SyncInterval, Flags);
+
+    _skipPresent = false;
+    _skipPresent1 = false;
+
+    LOG_DEBUG("[FGExtrap] PresentSynthetic result: {:X}", (UINT) result);
     return result;
 }
 

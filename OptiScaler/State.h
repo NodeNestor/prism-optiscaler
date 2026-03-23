@@ -42,7 +42,8 @@ enum class FGOutput : uint32_t
     Nukems,
     FSRFG,
     DLSSG,
-    XeFG
+    XeFG,
+    FGExtrap
 };
 
 typedef struct CapturedHudlessInfo

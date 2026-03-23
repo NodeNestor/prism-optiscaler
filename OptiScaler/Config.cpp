@@ -98,6 +98,8 @@ bool Config::Reload(std::filesystem::path iniPath)
                     FGOutput.set_from_config(FGOutput::Nukems);
                 else if (lstrcmpiA(FGOutputString.value().c_str(), "xefg") == 0)
                     FGOutput.set_from_config(FGOutput::XeFG);
+                else if (lstrcmpiA(FGOutputString.value().c_str(), "fgextrap") == 0)
+                    FGOutput.set_from_config(FGOutput::FGExtrap);
             }
 
             FGDrawUIOverFG.set_from_config(readBool("FrameGen", "DrawUIOverFG"));
@@ -183,6 +185,22 @@ bool Config::Reload(std::filesystem::path iniPath)
             FGXeFGSkipResizeBuffers.set_from_config(readBool("XeFG", "SkipResizeBuffers"));
             FGXeFGModifyBufferState.set_from_config(readBool("XeFG", "ModifyBufferState"));
             FGXeFGModifySCIndex.set_from_config(readBool("XeFG", "ModifySCIndex"));
+        }
+
+        // FGExtrap (Frame Extrapolation)
+        {
+            FGExtrapTargetFPS.set_from_config(readInt("FGExtrap", "TargetFPS"));
+            FGExtrapMouseSensitivity.set_from_config(readFloat("FGExtrap", "MouseSensitivity"));
+            FGExtrapAutoCalibrate.set_from_config(readBool("FGExtrap", "AutoCalibrate"));
+            FGExtrapDepthScale.set_from_config(readFloat("FGExtrap", "DepthScale"));
+            FGExtrapFOV.set_from_config(readFloat("FGExtrap", "FOV"));
+            FGExtrapNearThreshold.set_from_config(readFloat("FGExtrap", "NearThreshold"));
+            FGExtrapFarThreshold.set_from_config(readFloat("FGExtrap", "FarThreshold"));
+            FGExtrapSkyThreshold.set_from_config(readFloat("FGExtrap", "SkyThreshold"));
+            FGExtrapHUDThreshold.set_from_config(readFloat("FGExtrap", "HUDThreshold"));
+            FGExtrapGapFillMode.set_from_config(readInt("FGExtrap", "GapFillMode"));
+            FGExtrapMVExtrapolation.set_from_config(readBool("FGExtrap", "MVExtrapolation"));
+            FGExtrapDebugLayers.set_from_config(readBool("FGExtrap", "DebugLayers"));
         }
 
         // FSR FG Inputs
@@ -747,6 +765,8 @@ bool Config::SaveIni()
                 FGOutputString = "Nukems";
             else if (FGOutputHeld.value() == FGOutput::XeFG)
                 FGOutputString = "XeFG";
+            else if (FGOutputHeld.value() == FGOutput::FGExtrap)
+                FGOutputString = "FGExtrap";
         }
         ini.SetValue("FrameGen", "FGOutput", FGOutputString.c_str());
         ini.SetValue("FrameGen", "DrawUIOverFG", GetBoolValue(Instance()->FGDrawUIOverFG.value_for_config()).c_str());
@@ -814,6 +834,32 @@ bool Config::SaveIni()
         ini.SetValue("XeFG", "ModifyBufferState",
                      GetBoolValue(Instance()->FGXeFGModifyBufferState.value_for_config()).c_str());
         ini.SetValue("XeFG", "ModifySCIndex", GetBoolValue(Instance()->FGXeFGModifySCIndex.value_for_config()).c_str());
+    }
+
+    // FGExtrap (Frame Extrapolation)
+    {
+        ini.SetValue("FGExtrap", "TargetFPS", GetIntValue(Instance()->FGExtrapTargetFPS.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "MouseSensitivity",
+                     GetFloatValue(Instance()->FGExtrapMouseSensitivity.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "AutoCalibrate",
+                     GetBoolValue(Instance()->FGExtrapAutoCalibrate.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "DepthScale",
+                     GetFloatValue(Instance()->FGExtrapDepthScale.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "FOV", GetFloatValue(Instance()->FGExtrapFOV.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "NearThreshold",
+                     GetFloatValue(Instance()->FGExtrapNearThreshold.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "FarThreshold",
+                     GetFloatValue(Instance()->FGExtrapFarThreshold.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "SkyThreshold",
+                     GetFloatValue(Instance()->FGExtrapSkyThreshold.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "HUDThreshold",
+                     GetFloatValue(Instance()->FGExtrapHUDThreshold.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "GapFillMode",
+                     GetIntValue(Instance()->FGExtrapGapFillMode.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "MVExtrapolation",
+                     GetBoolValue(Instance()->FGExtrapMVExtrapolation.value_for_config()).c_str());
+        ini.SetValue("FGExtrap", "DebugLayers",
+                     GetBoolValue(Instance()->FGExtrapDebugLayers.value_for_config()).c_str());
     }
 
     // OptiFG

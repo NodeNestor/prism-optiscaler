@@ -13,6 +13,9 @@ class FGHooks
                                           DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
                                           IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain);
 
+    // Present a synthetic frame (used by FGExtrap to insert extra frames)
+    static HRESULT PresentSynthetic(void* swapchainThis, UINT SyncInterval, UINT Flags);
+
   private:
     typedef HRESULT (*PFN_Present)(void* This, UINT SyncInterval, UINT Flags);
     typedef HRESULT (*PFN_Present1)(void* This, UINT SyncInterval, UINT Flags,
